@@ -63,6 +63,9 @@ uint8_t opinion[87] = { 'O' };
         S  = Submitted vote
         A  = Actioned now
         B  = Can't action because balance of sender is too low
+        E  = Internal error
+        e  = Internal error 2
+        W  = Invalid opinion (amt <= 0)
        ' ' = No opinion in this slot
 */
 uint8_t donemsg[] = "Tip: 00 Opinions processed. Results:                 ";
@@ -82,16 +85,26 @@ int64_t hook(uint32_t r)
     // try to clean up 16 entries
     for (int i = 0; GUARD(16), *cleanup_lower < *cleanup_upper && i < 16; ++i, ++*cleanup_lower)
     {
+        uint8_t key[256];
+        int64_t key_len = state(SBUF(key), SBUF(cleanup_key_lower));
+        if (key_len < 0)
+            break;
+
         uint8_t val[256];
-        int64_t len;
-        // all values start with the ledger in which they were created
-        if ((len = state(SBUF(val), SBUF(cleanup_key_lower))) < 4 ||
-            *((uint32_t*)val) > cutoff_ledger)
+        int64_t val_len = state(SBUF(val), key, key_len);
+
+        if (val_len < 4)
+        {
+            // delete the cleanup entry
+            state_set(0, 0, SBUF(cleanup_key_lower));
+            continue;
+        }
+        
+        if (*((uint32_t*)val) > cutoff_ledger)
             break;
 
         // delete the entry pointed to
-        state_set(0, 0, val, len);
-
+        state_set(0, 0, key, key_len);
         // delete the cleanup entry
         state_set(0, 0, SBUF(cleanup_key_lower));
     }
@@ -130,7 +143,7 @@ int64_t hook(uint32_t r)
     // is occupied and the right most bit (lsb) indicates if the seat for member 256 is occupied. we count the set
     // bits using a wasm intrinsic called popcnt, and this gives us the total current membership of the smart contract
     // we count the members by dividing the bit field into 4 lots of u64
-    uint8_t member_count =
+    uint16_t member_count =
             __builtin_popcountll(*((uint64_t*)(members_bitfield +  0))) +
             __builtin_popcountll(*((uint64_t*)(members_bitfield +  8))) +
             __builtin_popcountll(*((uint64_t*)(members_bitfield + 16))) +
@@ -140,7 +153,7 @@ int64_t hook(uint32_t r)
         NOPE("Tip: Misconfigured, no members.");    
 
     // threshold for actioning a tip is >50% of the members
-    uint8_t threshold = member_count >> 1U;
+    uint8_t threshold = (uint8_t)(member_count >> 1U);
 
     // logic for threshold follows.
     // maintain a super majority at any cost with as little computation as possible:
@@ -307,6 +320,7 @@ int64_t hook(uint32_t r)
             // rather set a state entry that lets another hook do the emit
             uint8_t key[2] = { 'H', opinion[2] };
             state_set(opinion + 3, 32, SBUF(key));
+            state_set(post_info, 37, opinion, 10);
             continue;
         }
 
@@ -344,6 +358,14 @@ int64_t hook(uint32_t r)
             
             // update bitfield
             state_set(SBUF(members_bitfield), SBUF(members_bitfield_key));
+            state_set(post_info, 37, opinion, 10);
+            continue;
+        }
+
+        // sanity check amount
+        if (float_compare(AMTXFL, 0, COMPARE_LESS | COMPARE_EQUAL) == 1)
+        {
+            *donemsg_upto = 'W';
             continue;
         }
 
@@ -423,6 +445,8 @@ int64_t hook(uint32_t r)
             state_set(0,0, SBUF(to_key_hash));
         else
             state_set(SVAR(final_to_bal), SBUF(to_key_hash));
+        
+        state_set(post_info, 37, opinion, 10);
     }
     
     // update the cleanup boundaries
