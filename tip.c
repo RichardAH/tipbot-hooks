@@ -205,7 +205,7 @@ int64_t hook(uint32_t r)
         {   
             // add a cleanup key if the entry doesn't exist 
             state_set(opinion, 10, SBUF(cleanup_key_upper));
-            cleanup_upper++;
+            ++*cleanup_upper;
         }
 
         if (post_info[4])
