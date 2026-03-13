@@ -40,7 +40,7 @@ uint8_t cleanup_key_lowwater[32] = {'S', 'L'};
 uint8_t members_bitfield_key[32] = {'S', 'M'};
 
 uint8_t cleanup_key_lower[32] = {'C'};
-uint64_t cleanup_key_upper[32] = {'C'};
+uint8_t cleanup_key_upper[32] = {'C'};
 
 uint64_t* cleanup_lower = cleanup_key_lower + 1;
 uint64_t* cleanup_upper = cleanup_key_upper + 1;
@@ -154,30 +154,27 @@ int64_t hook(uint32_t r)
     threshold++;
 
 
-#define SNID   *((uint8_t*)(opinion +  0U))
-#define POSTID *((uint64_t*)(opinion +  1U))
-#define FROMID *((uint64_t*)(opinion + 29U))
-#define FROMID_PTR ((uint64_t*)(opinion + 29U))
+#define SNID   *((uint8_t*)(opinion +  1U))
+#define POSTID *((uint64_t*)(opinion +  2U))
+#define FROMID *((uint64_t*)(opinion + 30U))
+#define FROMID_PTR ((uint64_t*)(opinion + 30U))
 // only if tip isn't to an r-addr
-#define TOID   *((uint64_t*)(opinion + 21U))
+#define TOID   *((uint64_t*)(opinion + 22U))
 // only if tip is to an r-addr
-#define TOACC  (opinion + 9U)
+#define TOACC  (opinion + 10U)
 // whether the tip is to an r-addr or not
 #define IS_TOACC  (\
-        *((uint64_t*)(opinion + 9U)) == 0 &&\
-        *((uint32_t*)(opinion + 17U)) == 0)
-#define CUR    (opinion + 37U)
-#define ISS    (opinion + 57U)
-#define AMTXFL *((uint64_t*)(opinion + 77U))
+        *((uint64_t*)(opinion + 10U)) != 0 ||\
+        *((uint32_t*)(opinion + 18U)) != 0)
+#define CUR    (opinion + 38U)
+#define ISS    (opinion + 58U)
+#define AMTXFL *((uint64_t*)(opinion + 78U))
 
     // process opinions
     int i = 0;
     uint8_t* donemsg_upto = donemsg + 37;
     for (; GUARD(16), i < 16; ++i, ++donemsg_upto)
     {
-        if (i == 10)
-            (*tens)++;
-
         otxn_param(opinion + 1, 86, &i, 1);
         
         // a social network id of 0 is the same as stop processing
@@ -240,7 +237,7 @@ int64_t hook(uint32_t r)
         state(SBUF(votes), SBUF(opinion));
 
         votes[4]++;
-        state(SBUF(votes), SBUF(opinion));
+        state_set(SBUF(votes), SBUF(opinion));
         
         // assign a cleanup key if this is a new opinion
         if (votes[4] == 1)
@@ -254,7 +251,7 @@ int64_t hook(uint32_t r)
             post_info[4] = 1;
 
         // update postinfo
-        state_set(post_info, 37, opinion, 9);
+        state_set(post_info, 37, opinion, 10);
            
         // only continue past this point if we're actioning the tip
         if (!post_info[4])
@@ -301,7 +298,7 @@ int64_t hook(uint32_t r)
  hook   SLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH000000000000000000000000000000000000000000000000000
         */ 
 
-        if (opinion[0] == 255)
+        if (SNID == 255)
         {
             // action hook change
             // because this requires an emit we don't handle it inside this large loop
@@ -311,7 +308,7 @@ int64_t hook(uint32_t r)
             continue;
         }
 
-        if (opinion[0] == 254)
+        if (SNID == 254)
         {
             // action member voting
             uint8_t memacc[21] = {'M'};
@@ -344,18 +341,18 @@ int64_t hook(uint32_t r)
             }
             
             // update bitfield
-            state(SBUF(members_bitfield), SBUF(members_bitfield_key));
+            state_set(SBUF(members_bitfield), SBUF(members_bitfield_key));
             continue;
         }
 
         uint8_t from_key[60] = {SNID};
 
         *((uint64_t*)(from_key + 12U)) = FROMID;
-        *((uint64_t*)(from_key + 20U)) = *((uint64_t*)(opinion + 37U));  // first 8 bytes of currency
-        *((uint64_t*)(from_key + 28U)) = *((uint64_t*)(opinion + 45U));  // second 8 bytes of currency
-        *((uint64_t*)(from_key + 36U)) = *((uint64_t*)(opinion + 53U));  // last 4 bytes of currency, first 4 of iss
-        *((uint64_t*)(from_key + 44U)) = *((uint64_t*)(opinion + 61U));  // middle 8 bytes of issuer
-        *((uint64_t*)(from_key + 52U)) = *((uint64_t*)(opinion + 69U));  // last 8 bytes of issuer
+        *((uint64_t*)(from_key + 20U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
+        *((uint64_t*)(from_key + 28U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
+        *((uint64_t*)(from_key + 36U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
+        *((uint64_t*)(from_key + 44U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
+        *((uint64_t*)(from_key + 52U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
         uint8_t to_key[60] = {SNID};
         if (IS_TOACC)
@@ -365,11 +362,11 @@ int64_t hook(uint32_t r)
         } 
         *((uint64_t*)(to_key + 12U)) = TOID;
         
-        *((uint64_t*)(to_key + 20U)) = *((uint64_t*)(opinion + 37U));  // first 8 bytes of currency
-        *((uint64_t*)(to_key + 28U)) = *((uint64_t*)(opinion + 45U));  // second 8 bytes of currency
-        *((uint64_t*)(to_key + 36U)) = *((uint64_t*)(opinion + 53U));  // last 4 bytes of currency, first 4 of iss
-        *((uint64_t*)(to_key + 44U)) = *((uint64_t*)(opinion + 61U));  // middle 8 bytes of issuer
-        *((uint64_t*)(to_key + 52U)) = *((uint64_t*)(opinion + 69U));  // last 8 bytes of issuer
+        *((uint64_t*)(to_key + 20U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
+        *((uint64_t*)(to_key + 28U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
+        *((uint64_t*)(to_key + 36U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
+        *((uint64_t*)(to_key + 44U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
+        *((uint64_t*)(to_key + 52U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
         
         uint8_t from_key_hash[32];
