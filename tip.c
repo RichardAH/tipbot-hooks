@@ -289,13 +289,15 @@ int64_t hook(uint32_t r)
         H = Hook Hash
         L = Hook position
 
+        O = Literal ascii O used to mark an opinion
+
         There are three different types of opinion: tip voting, member voting and hook voting.
 
         0         1         2         3         4         5         6         7         8
         0123456789012345678901234567890123456789012345678901234567890123456789012345678901234
- tip    SPPPPPPPPTTTTTTTTTTTTTTTTTTTTFFFFFFFFCCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIAAAAAAAA
- mem    SDMMMMMMMMMMMMMMMMMMMM000000000000000000000000000000000000000000000000000000000000000
- hook   SLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH000000000000000000000000000000000000000000000000000
+ tip    OSPPPPPPPPTTTTTTTTTTTTTTTTTTTTFFFFFFFFCCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIAAAAAAAA
+ mem    OSDMMMMMMMMMMMMMMMMMMMM000000000000000000000000000000000000000000000000000000000000000
+ hook   OSLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH000000000000000000000000000000000000000000000000000
         */ 
 
         if (SNID == 255)
@@ -303,8 +305,8 @@ int64_t hook(uint32_t r)
             // action hook change
             // because this requires an emit we don't handle it inside this large loop
             // rather set a state entry that lets another hook do the emit
-            uint8_t key[2] = { 'H', opinion[1] };
-            state_set(opinion + 2, 32, SBUF(key));
+            uint8_t key[2] = { 'H', opinion[2] };
+            state_set(opinion + 3, 32, SBUF(key));
             continue;
         }
 
@@ -312,28 +314,28 @@ int64_t hook(uint32_t r)
         {
             // action member voting
             uint8_t memacc[21] = {'M'};
-            uint8_t pos[2] = {'P', opinion[1]};
+            uint8_t pos[2] = {'P', opinion[2]};
             
             // always delete a member even if its already empty
-            members_bitfield[opinion[1] >> 3] &= ~(1U << (opinion[1] % 8));
+            members_bitfield[opinion[2] >> 3] &= ~(1U << (opinion[2] % 8));
             state(memacc + 1, 20,  SBUF(pos));
             state_set(0,0, SBUF(memacc));
             state_set(0,0, SBUF(pos));
 
-            if (!((*((uint64_t*)(opinion + 2)) == 0 && 
-                *((uint64_t*)(opinion + 10)) == 0 && 
-                *((uint32_t*)(opinion + 18)) == 0)))
+            if (!((*((uint64_t*)(opinion + 3)) == 0 && 
+                *((uint64_t*)(opinion + 11)) == 0 && 
+                *((uint32_t*)(opinion + 19)) == 0)))
             {
                 // if the specified acc isnt the zero account we'll add a member too
                 // add a member
-                members_bitfield[opinion[1] >> 3] |= (1U << (opinion[1] % 8));
+                members_bitfield[opinion[2] >> 3] |= (1U << (opinion[2] % 8));
                 // copy accid into member key
-                *((uint64_t*)(memacc+1)) = *((uint64_t*)(opinion + 2));
-                *((uint64_t*)(memacc+9)) = *((uint64_t*)(opinion + 10));
-                *((uint32_t*)(memacc+17)) = *((uint32_t*)(opinion + 18));
+                *((uint64_t*)(memacc+1)) = *((uint64_t*)(opinion + 3));
+                *((uint64_t*)(memacc+9)) = *((uint64_t*)(opinion + 11));
+                *((uint32_t*)(memacc+17)) = *((uint32_t*)(opinion + 19));
 
                 // add member key
-                state_set(opinion + 1, 1, SBUF(memacc));
+                state_set(opinion + 2, 1, SBUF(memacc));
 
                 // add reverse key
                 state_set(memacc + 1, 20, SBUF(pos)); 
