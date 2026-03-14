@@ -47,7 +47,6 @@ uint64_t* cleanup_upper = cleanup_key_upper + 1;
 
 uint8_t otxn_acc[21] = { 'M' };
 
-uint8_t opinion[87] = { 'O' };
 
 //uint8_t user_info_key[22] = { 'U' };
 
@@ -195,6 +194,8 @@ int64_t hook(uint32_t r)
     uint8_t* donemsg_upto = donemsg + 37;
     for (; GUARD(16), i < 16; ++i, ++donemsg_upto)
     {
+        uint8_t opinion[87];
+        opinion[0] = 'O';
         otxn_param(opinion + 1, 86, &i, 1);
         
         // a social network id of 0 is the same as stop processing
@@ -254,15 +255,20 @@ int64_t hook(uint32_t r)
         // increment the vote counter for this specific position on this post
         uint8_t votes[5];
         *((uint32_t*)votes) = current_ledger; // all values are prefixed with ledger seq for cleanup
-        state(SBUF(votes), SBUF(opinion));
+        
+        uint8_t opinion_key[32];
+        util_sha512h(SBUF(opinion_key), SBUF(opinion));
+        opinion_key[0] = 'O';
+
+        state(SBUF(votes), SBUF(opinion_key));
 
         votes[4]++;
-        state_set(SBUF(votes), SBUF(opinion));
+        state_set(SBUF(votes), SBUF(opinion_key));
         
         // assign a cleanup key if this is a new opinion
         if (votes[4] == 1)
         {
-            state_set(SBUF(opinion), SBUF(cleanup_key_upper));
+            state_set(SBUF(opinion_key), SBUF(cleanup_key_upper));
             ++*cleanup_upper;
         }
 
