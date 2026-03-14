@@ -49,6 +49,8 @@ uint8_t otxn_acc[21] = { 'M' };
 
 uint8_t opinion[87] = { 'O' };
 
+//uint8_t user_info_key[22] = { 'U' };
+
 // state keys:
 // 'S' L/H/M       - special keys above: low water mark, high water mark (for gc), m for member bit field
 // 'M' accid       - accid -> seat id
@@ -57,6 +59,10 @@ uint8_t opinion[87] = { 'O' };
 // 'O' opinion     - snid.postid->post_info
 // 'H' pos         - voting said hook hash can be installed at this position (action by other hook)
 // 'B' balhash     - user-currency-issuer balance hashes
+// user info below contains a catalogue of which balances are held by a given user.
+// 'U' useracc     - snid.11zeros.userid or accid -> 256 bit field containing keys to balances held
+// 'U' useracc . c - as above but with a one byte indicator as per bit field -> validly held balance hash
+ 
 /*  Result codes:
         D  = Actioned already (done)
         V  = Voted already
@@ -66,6 +72,7 @@ uint8_t opinion[87] = { 'O' };
         E  = Internal error
         e  = Internal error 2
         W  = Invalid opinion (amt <= 0)
+        C  = Can't slot new currency in destination user (too many currencies > 256)
        ' ' = No opinion in this slot
 */
 uint8_t donemsg[] = "Tip: 00 Opinions processed. Results:                 ";
@@ -272,9 +279,6 @@ int64_t hook(uint32_t r)
 
         *donemsg_upto = 'A';
 
-        // first mark it as actioned so we don't do it twice
-        post_info[4] = 1;
-
         // check if the from user has balance to cover
         
         // balances key (sha512h hashed):
@@ -283,10 +287,6 @@ int64_t hook(uint32_t r)
         // 20-39 : cur  : 20 byte currency code (zeros for xah)
         // 40-59 : acc  : 20 byte issuer accid  (zeros for xah)
       
-        // RHUPTO: fix balances keys ensure they are hashed properly as above
-        // fix state_foreign stuff, adjust for 1 byte snetid everywhere no namespaces
-        // member and hook vote actioning on snetids 254 and 255 
-        
         /*
         opinion binary layout: 
         S = Social network id (u8)
@@ -320,7 +320,6 @@ int64_t hook(uint32_t r)
             // rather set a state entry that lets another hook do the emit
             uint8_t key[2] = { 'H', opinion[2] };
             state_set(opinion + 3, 32, SBUF(key));
-            state_set(post_info, 37, opinion, 10);
             continue;
         }
 
@@ -358,7 +357,6 @@ int64_t hook(uint32_t r)
             
             // update bitfield
             state_set(SBUF(members_bitfield), SBUF(members_bitfield_key));
-            state_set(post_info, 37, opinion, 10);
             continue;
         }
 
@@ -369,41 +367,52 @@ int64_t hook(uint32_t r)
             continue;
         }
 
-        uint8_t from_key[60] = {SNID};
+        // to avoid double copying the from and to keys will also be the userinfo keys (prefixed with the 'U')
+        // however we won't use the 'U' part until a bit later when we need to update user info
+        uint8_t from_key[61] = {'U', SNID};
 
-        *((uint64_t*)(from_key + 12U)) = FROMID;
-        *((uint64_t*)(from_key + 20U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
-        *((uint64_t*)(from_key + 28U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
-        *((uint64_t*)(from_key + 36U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
-        *((uint64_t*)(from_key + 44U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
-        *((uint64_t*)(from_key + 52U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
+        *((uint64_t*)(from_key + 13U)) = FROMID;
+        *((uint64_t*)(from_key + 21U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
+        *((uint64_t*)(from_key + 29U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
+        *((uint64_t*)(from_key + 37U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
+        *((uint64_t*)(from_key + 45U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
+        *((uint64_t*)(from_key + 53U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
-        uint8_t to_key[60] = {SNID};
+        uint8_t to_key[61] = {'U', SNID};
         if (IS_TOACC)
         {
-            *((uint64_t*)(to_key + 0U)) = *((uint64_t*)(TOACC + 0U));
-            *((uint32_t*)(to_key + 8U)) = *((uint32_t*)(TOACC + 8U));
+            *((uint64_t*)(to_key + 1U)) = *((uint64_t*)(TOACC + 0U));
+            *((uint32_t*)(to_key + 9U)) = *((uint32_t*)(TOACC + 8U));
         } 
-        *((uint64_t*)(to_key + 12U)) = TOID;
+        *((uint64_t*)(to_key + 13U)) = TOID;
         
-        *((uint64_t*)(to_key + 20U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
-        *((uint64_t*)(to_key + 28U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
-        *((uint64_t*)(to_key + 36U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
-        *((uint64_t*)(to_key + 44U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
-        *((uint64_t*)(to_key + 52U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
+        *((uint64_t*)(to_key + 21U)) = *((uint64_t*)(opinion + 38U));  // first 8 bytes of currency
+        *((uint64_t*)(to_key + 29U)) = *((uint64_t*)(opinion + 46U));  // second 8 bytes of currency
+        *((uint64_t*)(to_key + 37U)) = *((uint64_t*)(opinion + 54U));  // last 4 bytes of currency, first 4 of iss
+        *((uint64_t*)(to_key + 45U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
+        *((uint64_t*)(to_key + 53U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
         
         uint8_t from_key_hash[32];
-        util_sha512h(SBUF(from_key_hash), SBUF(from_key));
+        util_sha512h(SBUF(from_key_hash), from_key + 1, 60);
         uint8_t to_key_hash[32];
-        util_sha512h(SBUF(to_key_hash), SBUF(to_key));
+        util_sha512h(SBUF(to_key_hash), to_key + 1, 60);
 
         from_key_hash[0] = 'B';
         to_key_hash[0] = 'B';
 
-        int64_t from_bal;
+        // balance buffer is 8 bytes of xfl and 1 byte of "balance idx" in the user info
+        // user_info bitfield contains 256 slots which is each occupied by a currency
+        // this is purely for explorers to look up which currencies are held by which user
+        // otherwise full history would be needed to see which currencies are held by a user
+        // since the currency pairs are hashed
+        uint8_t from_bal_buf[9];
+
         // the balances key for the from address is already encoded inside the opinion 
-        state(SVAR(from_bal), SBUF(from_key_hash));
+        state(SBUF(from_bal_buf), SBUF(from_key_hash));
+        
+        int64_t from_bal = *((uint64_t*)(from_bal_buf));
+        uint8_t from_idx = *((uint8_t*)(from_bal_buf + 8U));
 
         // check if the balance can even cover the xfer
         if (float_compare(from_bal, AMTXFL, COMPARE_LESS) == 1)
@@ -422,31 +431,90 @@ int64_t hook(uint32_t r)
             continue;
         }
         
-        int64_t to_bal;
-        state(SVAR(to_bal), SBUF(to_key_hash));
+        uint8_t to_bal_buf[9];
+
+        state(SBUF(to_bal_buf), SBUF(to_key_hash));
+
+        int64_t to_bal = *((uint64_t*)(to_bal_buf));
+        uint8_t to_idx = *((uint8_t*)(to_bal_buf + 8U)); 
+
 
         int64_t final_to_bal = float_sum(to_bal, AMTXFL);
 
-        if (final_to_bal < 0 || float_compare(final_to_bal, to_bal, COMPARE_LESS) == 1)
+        if (final_to_bal <= 0 || float_compare(final_to_bal, to_bal, COMPARE_LESS) == 1)
         {
             // internal error / overflow / insane result
             *donemsg_upto = 'O';
             continue;
         }
+       
+        uint8_t to_user_info[32];
+        state(SBUF(to_user_info), to_key, 21);
+
+        uint8_t from_user_info[32];
+        state(SBUF(from_user_info), from_key, 21);
+
+        *((uint64_t*)from_bal_buf) = final_from_bal;
+        *((uint64_t*)to_bal_buf) = final_to_bal;
         
+        if (to_bal == 0)
+        {
+            // if the to-user didn't have this currency before this xfer we need to "slot-in" a new currency
+            // that they are holding according to their userinfo card
+            // we do that by finding the lowest available 0 bit in the 256 bit field on the user info key
+            uint64_t* w = (uint64_t *)to_user_info;
+            uint64_t v;
+
+            if      ((v = ~w[0])) to_idx =       __builtin_ctzll(v);
+            else if ((v = ~w[1])) to_idx =  64 + __builtin_ctzll(v);
+            else if ((v = ~w[2])) to_idx = 128 + __builtin_ctzll(v);
+            else if ((v = ~w[3])) to_idx = 192 + __builtin_ctzll(v);
+            else
+            {
+                // user can't accept new currencies, already maxed out at 256
+                *donemsg_upto = 'C';
+                continue;
+            }
+
+            to_user_info[to_idx >> 3] |= (uint8_t)(1U << (to_idx % 8U));
+            // we'll clober some data in the to_key buffer to construct this user info entry
+            // 'U'. snid . 11 zeros . userid . idx, or
+            // 'U' . accid . idx
+            // 0         1         2
+            // 0123456789012345678901
+            // UAAAAAAAAAAAAAAAAAAAAI
+            // US00000000000UUUUUUUUI
+            // maps to currency . issuer (pulled from opinion field)
+            to_key[21] = to_idx;
+            
+            state_set(opinion + 38U, 40, to_key, 22);
+
+            // update the user info to reflect the index
+            state_set(SBUF(to_user_info), to_key, 21);
+
+            to_bal_buf[8] = to_idx;
+        }
+
         // update from balance
         if (final_from_bal == 0)
+        {
+            // if the final balance is completely xfered then remove the currency from the user altogether
             state_set(0,0, SBUF(from_key_hash));
-        else
-            state_set(SVAR(final_from_bal), SBUF(from_key_hash));
 
-        // update to balance
-        if (final_to_bal == 0)
-            state_set(0,0, SBUF(to_key_hash));
+            // also erase the bit from the user's info that represents this currency
+            from_user_info[from_idx >> 3U] &= ~((uint8_t)(1U << (from_idx % 8U)));
+
+            state_set(SBUF(from_user_info), from_key, 21);
+
+            // delete the index
+            from_key[21] = from_idx;
+            state_set(0,0, from_key, 22);
+        }
         else
-            state_set(SVAR(final_to_bal), SBUF(to_key_hash));
+            state_set(SBUF(from_bal_buf), SBUF(from_key_hash));
+
         
-        state_set(post_info, 37, opinion, 10);
+        state_set(SBUF(to_bal_buf), SBUF(to_key_hash));
     }
     
     // update the cleanup boundaries
