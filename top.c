@@ -155,7 +155,7 @@ int64_t hook(uint32_t r)
         if (otxn_param(to_key + 1, 20, "DEPOSIT", 7) != 20)
             NOPE("Top: Remit missing DEPOSIT HookParameter containing u8:SNID.11x0bytes.u64:USERID.");
 
-        if (to_key[0] == 0 || to_key[0] >= 254)
+        if (to_key[1] == 0 || to_key[1] >= 254)
             NOPE("Top: Remit attempting to deposit to invalid SNID (try 1 for twitter.)");
 
         // to prevent laundering etc we prevent depositing to an accid account, we do this by enforcing the 11x0s
@@ -178,12 +178,6 @@ int64_t hook(uint32_t r)
         // EAAAAAAAACCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIF
         //
         COPY40(amt_buf + 9U, to_key + 21U);
-
-        /**((uint64_t*)(to_key + 21)) = *((uint64_t*)(amt_buf +  9U));
-        *((uint64_t*)(to_key + 29)) = *((uint64_t*)(amt_buf + 17U));
-        *((uint64_t*)(to_key + 37)) = *((uint64_t*)(amt_buf + 25U));
-        *((uint64_t*)(to_key + 45)) = *((uint64_t*)(amt_buf + 33U));
-        *((uint64_t*)(to_key + 53)) = *((uint64_t*)(amt_buf + 51U)); */
 
         int64_t amt = slot_float(2);
 
@@ -278,11 +272,13 @@ int64_t hook(uint32_t r)
        (*((uint64_t*)(req + 21U)) == 0 &&
         *((uint64_t*)(req + 29U)) == 0 &&
         *((uint64_t*)(req + 37U)) == 0 &&
-        *((uint64_t*)(req + 55U)) == 0 &&
+        *((uint64_t*)(req + 45U)) == 0 &&
         *((uint64_t*)(req + 53U)) == 0);
 
     uint8_t from_key_hash[32];
     util_sha512h(SBUF(from_key_hash), req + 1, 60);
+
+    from_key_hash[0] = 'B';
 
     uint8_t from_bal_buf[9];
     if (state(SBUF(from_bal_buf), SBUF(from_key_hash)) != 9)
@@ -310,9 +306,11 @@ int64_t hook(uint32_t r)
 
         // update the index to mark it as clear on the userinfo card
         uint8_t from_user_info[32];
-        state(SBUF(from_user_info), req, 21);
-        from_user_info[from_idx >> 3U] &= ~((uint8_t)(1U << (from_idx % 8U)));
-        state_set(SBUF(from_user_info), req, 21);
+        if (state(SBUF(from_user_info), req, 21) == 32)
+        {
+            from_user_info[from_idx >> 3U] &= ~((uint8_t)(1U << (from_idx % 8U)));
+            state_set(SBUF(from_user_info), req, 21);
+        }
     }
     else
     {
@@ -322,6 +320,21 @@ int64_t hook(uint32_t r)
             NOPE("Top: Insane final balance sum result.");
         *((uint64_t*)(from_bal_buf)) = final_from_bal;
         state_set(SBUF(from_bal_buf), SBUF(from_key_hash));
+    }
+
+
+    // check the receiver has the needed TL
+    if (!is_xah)
+    {
+        uint8_t keylet[34];
+        if (util_keylet(keylet, 34, KEYLET_LINE,
+                  OTXNACC, 20,
+                  req + 41U, 20U,
+                  req + 21U, 20U) != 34)
+            NOPE("Top: Internal error generating keylet.");
+
+        if (slot_set(SBUF(keylet), 3) != 3)
+            NOPE("Top: Trustline for this currency does not exist on your account.");
     }
 
     // honour reqxfl
@@ -366,5 +379,5 @@ int64_t hook(uint32_t r)
     if (DEBUG)
         TRACEVAR(emit_result);
     if (emit_result < 0)
-        rollback(SBUF("AMM: Emit failed."), __LINE__);
+        rollback(SBUF("Top: Emit failed."), __LINE__);
 }
