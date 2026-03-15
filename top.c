@@ -35,29 +35,27 @@
 #define NOPE(x) rollback((x), sizeof(x), __LINE__)
 #define ttREMIT 95U
 
-#define COPY20(src,dst)
-{
-    uint32_t* x = (dst);
-    uint32_t* y = (src);
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
+#define COPY20(src,dst)\
+{\
+    uint32_t* x = (dst);\
+    uint32_t* y = (src);\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
 }
 
-#define COPY40(src,dst)
-{
-    uint64_t* x = (dst);
-    uint64_t* y = (src);
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
-    *x++ = *y++;
+#define COPY40(src,dst)\
+{\
+    uint64_t* x = (dst);\
+    uint64_t* y = (src);\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
 }
-
-uint8_t user_info_key[22] = { 'U' };
 
 // state keys:
 // 'H' pos         - voting said hook hash can be installed at this position (action by other hook)
@@ -111,6 +109,9 @@ uint8_t txn_remit[60000] =
     *b++ = (drops_tmp >>  0) & 0xFFU;\
 }
 
+uint8_t amt_buf[50];
+uint8_t req[69] = {'U'};
+
 int64_t hook(uint32_t r)
 {
     _g(1,1);
@@ -130,24 +131,6 @@ int64_t hook(uint32_t r)
     if (tt != ttREMIT)
         DONE("Top: Passing non-remit.");
 
-/*
-
-    add(jss::Remit,
-        ttREMIT,
-        {
-            {sfDestination, soeREQUIRED},
-            {sfAmounts, soeOPTIONAL},
-            {sfURITokenIDs, soeOPTIONAL},
-            {sfMintURIToken, soeOPTIONAL},
-            {sfInvoiceID, soeOPTIONAL},
-            {sfDestinationTag, soeOPTIONAL},
-            {sfTicketSequence, soeOPTIONAL},
-            {sfBlob, soeOPTIONAL},
-            {sfInform, soeOPTIONAL},
-        },
-        commonFields);
-        */
-
     // validate remit
     otxn_slot(1);
 
@@ -163,8 +146,9 @@ int64_t hook(uint32_t r)
         if (slot_count(2) != 1 || slot_subarray(2, 0, 2) != 2) // || slot_subfield(2, sfAmount, 2) != 2)
             NOPE("Top: Remit must contain either one amount (for deposit) or no sfAmounts field (for withdraw).");
 
-        uint8_t amt_buf[50];
         slot(SBUF(amt_buf), 2);
+
+        int64_t is_xah = (slot_type(2, 1) == 1);
 
         // find the user's id from the parameter
         uint8_t to_key[61] = {'U'};
@@ -221,14 +205,11 @@ int64_t hook(uint32_t r)
         uint8_t to_user_info[32];
 
         // to prevent attacks, the first deposit to a new user must be xah and must be at least 10 xah
-        if (state(SBUF(to_user_info), to_key, 21) != 32 &&
-           (*((uint64_t*)(amt_buf +  9U)) != 0 ||
-            *((uint64_t*)(amt_buf + 17U)) != 0 ||
-            *((uint64_t*)(amt_buf + 25U)) != 0 ||
-            *((uint64_t*)(amt_buf + 33U)) != 0 ||
-            *((uint64_t*)(amt_buf + 51U)) != 0 ||
-            float_compare(amt, 6107881094714392576ULL /* 10.0 */, COMPARE_LESS) == 1))
+        if (state(SBUF(to_user_info), to_key, 21) != 32)
+        {
+            if (!is_xah || float_compare(amt, 6107881094714392576ULL /* 10.0 */, COMPARE_LESS) == 1)
                 NOPE("Top: First deposits must be in XAH and must be at least 10 XAH.");
+        }
 
         int64_t final_to_bal = float_sum(to_bal, amt);
         if (float_compare(final_to_bal, to_bal, COMPARE_LESS | COMPARE_EQUAL) == 1)
@@ -275,7 +256,6 @@ int64_t hook(uint32_t r)
     }
 
     // execution to here means empty remit (i.e. a withdrawal)
-    uint8_t req[69] = {'U'};
 
     // preifx the request buffer with the accid so we can do a balance lookup easily
     COPY20(OTXNACC, req + 1U);
@@ -293,6 +273,13 @@ int64_t hook(uint32_t r)
     // 0         1         2         3         4         5         6
     // 0123456789012345678901234567890123456789012345678901234567890123456789
     // UAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIXXXXXXXX
+
+    int64_t is_xah = 
+       (*((uint64_t*)(req + 21U)) == 0 &&
+        *((uint64_t*)(req + 29U)) == 0 &&
+        *((uint64_t*)(req + 37U)) == 0 &&
+        *((uint64_t*)(req + 55U)) == 0 &&
+        *((uint64_t*)(req + 53U)) == 0);
 
     uint8_t from_key_hash[32];
     util_sha512h(SBUF(from_key_hash), req + 1, 60);
@@ -339,11 +326,26 @@ int64_t hook(uint32_t r)
 
     // honour reqxfl
 
-    // RH UPTO: populate BE_DROPS sfAmount when withdrawing XAH or use the below otherwise
-    // process hook governance actioning
     float_sto(TXN_CUR_A, 49, req + 21U, 20, req + 41U, 20, reqxfl, sfAmount);
 
     int64_t bytes = 284;
+
+    // if the output is xah then we need to rewrite and shorten the amounts field
+    // for the alternative (native) integer format of xah
+    if (is_xah)
+    {
+        int64_t drops = float_int(reqxfl, 6, 0);
+        if (drops <= 0 || float_compare(float_set(6, drops), reqxfl, COMPARE_GREATER) == 1)
+            NOPE("Top: Insane drops computation.");
+
+        BE_DROPS(drops);
+        bytes -= 40;
+
+        *((uint64_t*)(TXN_CUR_A + 1U)) = drops;
+        
+        *(TXN_CUR_A +  9U) = 0xE1U;
+        *(TXN_CUR_A + 10U) = 0xF1U;
+    }
     etxn_details(TXN_EDET, 116);
     int64_t fee = etxn_fee_base(txn_remit, bytes);
     BE_DROPS(fee);
