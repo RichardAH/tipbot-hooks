@@ -173,6 +173,7 @@ int64_t hook(uint32_t r)
             state_set(SVAR(member_id), ptr, 20U);\
             uint8_t pos[2] = {'P', member_id++};\
             state_set(ptr, 20U, SBUF(pos));\
+            ptr += 20U;\
         }
         INIT_MEM;
         INIT_MEM; // add a line for each initial member to avoid an explicit loop here
