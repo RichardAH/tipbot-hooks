@@ -172,9 +172,9 @@ int64_t hook(uint32_t r)
         {\
             members_bitfield[0] <<= 1U;\
             members_bitfield[0] |= 1U;\
-            state_set(SVAR(member_id), ptr, 20U);\
+            state_set(SVAR(member_id), ptr, 21U);\
             uint8_t pos[2] = {'P', member_id++};\
-            state_set(ptr, 20U, SBUF(pos));\
+            state_set(ptr + 1, 20U, SBUF(pos));\
             ptr += 21U;\
         }
         INIT_MEM;
