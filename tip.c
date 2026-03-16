@@ -51,7 +51,7 @@ uint8_t otxn_acc[21] = { 'M' };
 //uint8_t user_info_key[22] = { 'U' };
 
 // state keys:
-// 'S' L/H/M       - special keys above: low water mark, high water mark (for gc), m for member bit field
+// 'S' L/H/M/U     - special keys above: low water mark, high water mark (for gc), m for member bit field
 // 'M' accid       - accid -> seat id
 // 'P' seatid      - seat (pos) id -> accid
 // 'C' cleaupid    - cleanupid->cleanup key
@@ -77,6 +77,19 @@ uint8_t otxn_acc[21] = { 'M' };
 uint8_t donemsg[] = "Tip: 00 Opinions processed. Results:                 ";
 uint8_t* tens = (donemsg + 5U);
 uint8_t* ones = (donemsg + 6U);
+
+
+// populate all initial oracle game members here according to their accid, don't forget to 
+// include additional INIT_MEM macro calls below if adding more 
+uint8_t initial_members[] = {
+        // 0 - rsdRbg9tgW77ve8SfgvLpvfgiaaRR6F2ru
+     0x1CU,0xD3U,0xC2U,0x6AU,0xA2U,0x3BU,0x11U,0x0DU,0xF2U,0xD8U,
+     0x48U,0x9AU,0x8FU,0xC8U,0xFDU,0xCAU,0x98U,0x4EU,0x77U,0x70U,
+
+        // 1 - rK96RbjeeSzeuamRAQE3CDdzNdk7SM68yC
+     0xC7U,0x17U,0x56U,0x0EU,0x66U,0xDAU,0xE9U,0x75U,0x9BU,0xF1U,
+     0x85U,0xD3U,0x05U,0x92U,0xFCU,0x0BU,0x5FU,0xE7U,0x22U,0x68U
+};
 int64_t hook(uint32_t r)
 {
     _g(1,1);
@@ -133,15 +146,6 @@ int64_t hook(uint32_t r)
     if (tt != ttINVOKE)
         DONE("Tip: Passing non-invoke.");
 
-    // first check if they are a member of the game
-    uint8_t member_id;
-    if (state(SVAR(member_id), SBUF(otxn_acc)) != 1)
-        DONE("Tip: You're not a member of the tipbot oracle game. Did some cleanup anyway.");
-   
-    // execution to here means they're a member 
-    uint8_t const member_id_byte = member_id >> 3;
-    uint8_t const member_id_bit = member_id % 8;
-
     uint8_t members_bitfield[32];
     state(SBUF(members_bitfield), SBUF(members_bitfield_key));
 
@@ -156,7 +160,33 @@ int64_t hook(uint32_t r)
             __builtin_popcountll(*((uint64_t*)(members_bitfield + 24)));
     
     if (member_count == 0)
-        NOPE("Tip: Misconfigured, no members.");    
+    {
+        // do initial member setup
+
+        // backward and forward keys for each initial member:
+        uint8_t member_id = 0;
+        uint8_t* ptr = initial_members;
+        #define INIT_MEM\
+        {\
+            members_bitfield[0] <<= 1U;\
+            members_bitfield[0] |= 1U;\
+            state_set(SVAR(member_id), ptr, 20U);\
+            uint8_t pos[2] = {'P', member_id++};\
+            state_set(ptr, 20U, SBUF(pos));\
+        }
+        INIT_MEM;
+        INIT_MEM; // add a line for each initial member to avoid an explicit loop here
+        state_set(SBUF(members_bitfield), SBUF(members_bitfield_key));
+    }
+
+    // first check if they are a member of the game
+    uint8_t member_id;
+    if (state(SVAR(member_id), SBUF(otxn_acc)) != 1)
+        DONE("Tip: You're not a member of the tipbot oracle game. Did some cleanup anyway.");
+   
+    // execution to here means they're a member 
+    uint8_t const member_id_byte = member_id >> 3;
+    uint8_t const member_id_bit = member_id % 8;
 
     // threshold for actioning a tip is >50% of the members
     uint8_t threshold = (uint8_t)(member_count >> 1U);
