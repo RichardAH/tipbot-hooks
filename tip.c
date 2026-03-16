@@ -194,17 +194,17 @@ int64_t hook(uint32_t r)
     uint8_t* donemsg_upto = donemsg + 37;
     for (; GUARD(16), i < 16; ++i, ++donemsg_upto)
     {
-        uint8_t opinion[87];
+        uint8_t opinion[87] ;
         opinion[0] = 'O';
-        otxn_param(opinion + 1, 86, &i, 1);
         
         // a social network id of 0 is the same as stop processing
-        if (!SNID)
+        if (otxn_param(opinion + 1, 86, &i, 1) != 86 || !SNID)
             break;
+        
 
         // get some information about the post... the ledger it first appeared in
         // whether any xfer on it has been actioned, and who voted
-        uint8_t post_info[37];
+        uint8_t post_info[37] = {};
         /*
             key: netid-postid (u8.u64)
             value: 37 bytes comprisning--
@@ -253,7 +253,7 @@ int64_t hook(uint32_t r)
         // about this opinion expressed by the oracle game member (who xfer'd what to whom)
 
         // increment the vote counter for this specific position on this post
-        uint8_t votes[5];
+        uint8_t votes[5] = {};
         *((uint32_t*)votes) = current_ledger; // all values are prefixed with ledger seq for cleanup
         
         uint8_t opinion_key[32];
@@ -412,7 +412,7 @@ int64_t hook(uint32_t r)
         // this is purely for explorers to look up which currencies are held by which user
         // otherwise full history would be needed to see which currencies are held by a user
         // since the currency pairs are hashed
-        uint8_t from_bal_buf[9];
+        uint8_t from_bal_buf[9] = {};
 
         // the balances key for the from address is already encoded inside the opinion 
         state(SBUF(from_bal_buf), SBUF(from_key_hash));
@@ -437,7 +437,7 @@ int64_t hook(uint32_t r)
             continue;
         }
         
-        uint8_t to_bal_buf[9];
+        uint8_t to_bal_buf[9] = {};
 
         state(SBUF(to_bal_buf), SBUF(to_key_hash));
 
@@ -454,10 +454,10 @@ int64_t hook(uint32_t r)
             continue;
         }
        
-        uint8_t to_user_info[32];
+        uint8_t to_user_info[32] = {};
         state(SBUF(to_user_info), to_key, 21);
 
-        uint8_t from_user_info[32];
+        uint8_t from_user_info[32] = {};
         state(SBUF(from_user_info), from_key, 21);
 
         *((uint64_t*)from_bal_buf) = final_from_bal;

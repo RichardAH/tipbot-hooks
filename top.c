@@ -380,4 +380,6 @@ int64_t hook(uint32_t r)
         TRACEVAR(emit_result);
     if (emit_result < 0)
         rollback(SBUF("Top: Emit failed."), __LINE__);
+
+    // RHTODO: cbak on failure and hookhash action
 }
