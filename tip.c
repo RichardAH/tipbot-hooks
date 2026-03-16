@@ -145,8 +145,8 @@ int64_t hook(uint32_t r)
     uint8_t members_bitfield[32];
     state(SBUF(members_bitfield), SBUF(members_bitfield_key));
 
-    // the members bit field is a 256 bit field where the left most bit (msb) indicates if the seat for member 0
-    // is occupied and the right most bit (lsb) indicates if the seat for member 256 is occupied. we count the set
+    // the members bit field is a 256 bit field where the left most bit (msb) indicates if the seat for member 255
+    // is occupied and the right most bit (lsb) indicates if the seat for member 0 is occupied. we count the set
     // bits using a wasm intrinsic called popcnt, and this gives us the total current membership of the smart contract
     // we count the members by dividing the bit field into 4 lots of u64
     uint16_t member_count =
