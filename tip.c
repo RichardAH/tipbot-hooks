@@ -235,11 +235,15 @@ int64_t hook(uint32_t r)
     uint8_t* donemsg_upto = donemsg + 37;
     for (; GUARD(16), i < 16; ++i, ++donemsg_upto)
     {
-        uint8_t opinion[87] ;
+        uint8_t opinion[86] ;
         opinion[0] = 'O';
         
         // a social network id of 0 is the same as stop processing
-        if (otxn_param(opinion + 1, 86, &i, 1) != 86 || !SNID)
+
+        int64_t r = otxn_param(opinion + 1, 85, &i, 1);
+
+        TRACEVAR(r);
+        if (r != 85 || !SNID)
             break;
         
 
@@ -347,6 +351,7 @@ int64_t hook(uint32_t r)
         M = member accid (zero account to remove member)
         D = member slot (position 0 - 255)
         H = Hook Hash
+        K = Hook On
         L = Hook position
 
         O = Literal ascii O used to mark an opinion
@@ -354,10 +359,10 @@ int64_t hook(uint32_t r)
         There are three different types of opinion: tip voting, member voting and hook voting.
 
         0         1         2         3         4         5         6         7         8
-        0123456789012345678901234567890123456789012345678901234567890123456789012345678901234
+        01234567890123456789012345678901234567890123456789012345678901234567890123456789012345
  tip    OSPPPPPPPPTTTTTTTTTTTTTTTTTTTTFFFFFFFFCCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIAAAAAAAA
  mem    OSDMMMMMMMMMMMMMMMMMMMM000000000000000000000000000000000000000000000000000000000000000
- hook   OSLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH000000000000000000000000000000000000000000000000000
+ hook   OSLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK0000000000000000000
         */ 
 
         if (SNID == 255)
@@ -366,7 +371,7 @@ int64_t hook(uint32_t r)
             // because this requires an emit we don't handle it inside this large loop
             // rather set a state entry that lets another hook do the emit
             uint8_t key[2] = { 'H', opinion[2] };
-            state_set(opinion + 3, 32, SBUF(key));
+            state_set(opinion + 3, 64, SBUF(key));
             continue;
         }
 

@@ -57,6 +57,16 @@
     *x++ = *y++;\
 }
 
+#define COPY32(src,dst)\
+{\
+    uint64_t* x = (dst);\
+    uint64_t* y = (src);\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+    *x++ = *y++;\
+}
+
 // state keys:
 // 'H' pos         - voting said hook hash can be installed at this position (action by other hook)
 // 'B' balhash     - user-currency-issuer balance hashes
@@ -64,7 +74,7 @@
 // 'U' useracc     - snid.11zeros.userid or accid -> 256 bit field containing keys to balances held
 // 'U' useracc . c - as above but with a one byte indicator as per bit field -> validly held balance hash
 
-uint8_t txn_remit[60000] =
+uint8_t txn_remit[290] =
 {
 /* size,upto */
 /*   3,   0 */   0x12U, 0x00U, 0x5FU,                                                           /* tt = Remit       */
@@ -90,6 +100,35 @@ uint8_t txn_remit[60000] =
 /*   -, 290 */
 };
 
+uint8_t txn_sethook[306] =
+{
+/* size,upto */
+/*   3,   0 */   0x12U, 0x00U, 0x16U,                                                           /* tt = HookSet     */
+/*   5,   3 */   0x22U, 0x80U, 0x00U, 0x00U, 0x00U,                                          /* flags = tfCanonical */
+/*   5,   8 */   0x24U, 0x00U, 0x00U, 0x00U, 0x00U,                                                 /* sequence = 0 */
+/*   6,  13 */   0x20U, 0x1AU, 0x00U, 0x00U, 0x00U, 0x00U,                                      /* first ledger seq */
+/*   6,  19 */   0x20U, 0x1BU, 0x00U, 0x00U, 0x00U, 0x00U,                                       /* last ledger seq */
+/*   9,  25 */   0x68U, 0x40U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U, 0x00U,                         /* fee      */
+/*  35,  34 */   0x73U, 0x21U, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,       /* pubkey   */
+/*  22,  69 */   0x81U, 0x14U, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,                                  /* srcacc  */
+/* 116,  91 */   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,    /* emit detail */
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+/*  place 18 nops here, so that the hook set can be offset to any of the 10 locations by changing the number
+    of empty objects ahead of the hooksetobj */
+/*  18, 207 */  0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U,
+                0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U,
+/*   1, 225 */  0xFBU,                                                                      /* lead-in  hooks array */
+/*   1, 226 */  0xEEU,                                                                      /* lead-in hook entry 1 */
+/*   4, 227 */  0x10U, 0x14U, 0x00U, 0x00U,                                                 /* hookapiversion=0     */
+/*   5, 231 */  0x22U, 0x00U, 0x00U, 0x00U, 0x001U,                                         /* flags = hsfOverride  */
+/*  34, 236 */  0x50U, 0x14U,
+                0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,            /* hookon */
+/*  34, 270 */  0x50U, 0x1FU, 
+                0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,            /* hookhash */
+/*   2, 304 */  0xE1, 0xF1                                                                  /* lead out */
+/*   -, 306 */
+};
 #define TXN_CUR_A (txn_remit + 233)
 #define OTXNACC (txn_remit + 93)
 #define HOOKACC (txn_remit + 71)
@@ -379,7 +418,74 @@ int64_t hook(uint32_t r)
     if (DEBUG)
         TRACEVAR(emit_result);
     if (emit_result < 0)
-        rollback(SBUF("Top: Emit failed."), __LINE__);
+        rollback(SBUF("Top: Emit remit failed."), __LINE__);
 
-    // RHTODO: cbak on failure and hookhash action
+
+    // process any pending hooks. do this last because the above could rollback, and we just want to
+    // piggyback on a successful txn
+
+    uint8_t hookkey[2] = { 'H', 0 };
+    uint8_t hookhash[64];
+    int64_t emit_hook = 0;
+    uint8_t* nopptr = txn_sethook + 207;
+    for (hookkey[1] = 0; GUARD(10), hookkey[1] < 10; ++hookkey[1])
+    {
+        if (state(SBUF(hookhash), SBUF(hookkey)) == 64)
+        {
+            emit_hook = 1;
+            break;
+        }
+
+        *nopptr++ = 0xEEU;
+        *nopptr++ = 0xE1U;
+    }
+
+    if (!emit_hook)
+        DONE("Top: Done.");
+        
+    // execution to here means we're emitting a hookset
+
+    // set hook on
+    COPY32(hookhash + 32U, txn_sethook + 238U);
+
+    // set hookhash
+    COPY32(hookhash, txn_sethook + 272U);
+
+    // set from acc
+    COPY20(OTXNACC, txn_sethook + 71U);
+
+    // set etxn details
+    etxn_details(txn_sethook + 91U, 116);
+
+    {
+        int64_t bytes = sizeof(txn_sethook);
+        int64_t fee = etxn_fee_base(txn_sethook, bytes);
+        BE_DROPS(fee);
+        *((uint64_t*)(txn_sethook + 26)) = fee;
+        int64_t seq = ledger_seq() + 1;
+        txn_sethook[15] = (seq >> 24U) & 0xFFU;
+        txn_sethook[16] = (seq >> 16U) & 0xFFU;
+        txn_sethook[17] = (seq >>  8U) & 0xFFU;
+        txn_sethook[18] = seq & 0xFFU;
+        seq += 4;
+        txn_sethook[21] = (seq >> 24U) & 0xFFU;
+        txn_sethook[22] = (seq >> 16U) & 0xFFU;
+        txn_sethook[23] = (seq >>  8U) & 0xFFU;
+        txn_sethook[24] = seq & 0xFFU;
+        trace(SBUF("emitsh:"), txn_sethook, bytes, 1);
+        uint8_t emithash[32];
+        int64_t emit_result = emit(SBUF(emithash), txn_sethook, bytes);
+        if (DEBUG)
+            TRACEVAR(emit_result);
+        if (emit_result < 0)
+            rollback(SBUF("Top: Emit sethook failed."), __LINE__);
+
+    }
+
+    // remove the state entry
+    state_set(0,0, SBUF(hookkey)); 
+
+    DONE("Top: Done (+sethook)");
+
+    // RHTODO: cbak on failure 
 }
