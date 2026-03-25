@@ -33,7 +33,7 @@
 #define SVAR(x) &(x), sizeof(x)
 #define DONE(x) accept((x), sizeof(x), __LINE__)
 #define NOPE(x) rollback((x), sizeof(x), __LINE__)
-#define ttREMIT 95U
+#define ttREMIT 0x5F00U
 
 #define COPY20(src,dst)\
 {\
@@ -167,6 +167,9 @@ int64_t hook(uint32_t r)
     // pass all non-remits
     uint16_t tt;
     otxn_field(SVAR(tt), sfTransactionType);
+
+    
+
     if (tt != ttREMIT)
         DONE("Top: Passing non-remit.");
 
@@ -182,12 +185,24 @@ int64_t hook(uint32_t r)
     if (slot_subfield(1, sfAmounts, 2) != DOESNT_EXIST)
     {
         // this is a deposit
-        if (slot_count(2) != 1 || slot_subarray(2, 0, 2) != 2) // || slot_subfield(2, sfAmount, 2) != 2)
+        if (slot_count(2) != 1 || slot_subarray(2, 0, 3) != 3) // || slot_subfield(2, sfAmount, 2) != 2)
             NOPE("Top: Remit must contain either one amount (for deposit) or no sfAmounts field (for withdraw).");
 
-        slot(SBUF(amt_buf), 2);
+        int64_t size = slot(SBUF(amt_buf), 3);
+        
+        TRACEHEX(amt_buf);
+        TRACEVAR(size);
 
-        int64_t is_xah = (slot_type(2, 1) == 1);
+        if (size != 9 && size != 49)
+            NOPE("Top: Invalid amount deposited (somehow?) [1].");
+
+         
+
+        // RH UPTO: sub_array doesn't preserve the field type which means slot_type doesn't work properly
+        // switch it to a slot dump followed by size test and byte manipulation
+        int64_t is_xah = (size == 9);
+
+        TRACEVAR(is_xah);
 
         // find the user's id from the parameter
         uint8_t to_key[61] = {'U'};
@@ -218,10 +233,17 @@ int64_t hook(uint32_t r)
         //
         COPY40(amt_buf + 9U, to_key + 21U);
 
-        int64_t amt = slot_float(2);
+        int64_t amt = float_sto_set(amt_buf, size);
+
+        TRACEVAR(amt);
 
         if (amt <= 0)
-            NOPE("Top: Invalid amount deposited (somehow?).");
+            NOPE("Top: Invalid amount deposited (somehow?) [2].");
+        
+        if (is_xah)
+            amt = float_divide(amt, 6197953087261802496ULL /* 1 MM */);
+
+        TRACEVAR(amt);
 
         // credit the user
         uint8_t to_key_hash[32];
