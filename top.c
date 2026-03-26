@@ -409,8 +409,17 @@ int64_t hook(uint32_t r)
     if (is_xah)
     {
         int64_t drops = float_int(reqxfl, 6, 0);
-        if (drops <= 0 || float_compare(float_set(6, drops), reqxfl, COMPARE_GREATER) == 1)
+
+        int64_t recalc = float_set(-6, drops);
+        TRACEVAR(recalc);
+        TRACEVAR(reqxfl); 
+        TRACEVAR(drops);
+
+        if (drops <= 0 || float_compare(recalc, reqxfl, COMPARE_GREATER) == 1)
+        {
+            TRACEVAR(drops);
             NOPE("Top: Insane drops computation.");
+        }
 
         BE_DROPS(drops);
         bytes -= 40;

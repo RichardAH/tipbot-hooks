@@ -113,20 +113,29 @@ int64_t hook(uint32_t r)
     {
         uint8_t key[256];
         int64_t key_len = state(SBUF(key), SBUF(cleanup_key_lower));
+
+        TRACEVAR(key_len);
+        TRACEHEX(key);
         if (key_len < 0)
             break;
 
         uint8_t val[256];
         int64_t val_len = state(SBUF(val), key, key_len);
 
-        if (val_len < 4)
+        TRACEVAR(val_len);
+        TRACEHEX(val);
+        /*if (val_len < 4)
         {
             // delete the cleanup entry
             state_set(0, 0, SBUF(cleanup_key_lower));
             continue;
-        }
+        }*/
         
-        if (*((uint32_t*)val) > cutoff_ledger)
+        uint32_t entry_ledger = *((uint32_t*)val);
+        TRACEVAR(entry_ledger);
+        TRACEVAR(cutoff_ledger);
+
+        if (entry_ledger > cutoff_ledger)
             break;
 
         // delete the entry pointed to
@@ -213,6 +222,8 @@ int64_t hook(uint32_t r)
     // and so on
     threshold++;
 
+    TRACEVAR(member_count);
+    TRACEVAR(threshold);
 
 #define SNID   *((uint8_t*)(opinion +  1U))
 #define POSTID *((uint64_t*)(opinion +  2U))
@@ -298,17 +309,33 @@ int64_t hook(uint32_t r)
         // about this opinion expressed by the oracle game member (who xfer'd what to whom)
 
         // increment the vote counter for this specific position on this post
-        uint8_t votes[5] = {};
-        *((uint32_t*)votes) = current_ledger; // all values are prefixed with ledger seq for cleanup
-        
+        uint32_t votes_raw[2];
+        uint8_t* votes = votes_raw;
+        votes_raw[0] = current_ledger; // all values are prefixed with ledger seq for cleanup
+        TRACEVAR(current_ledger);
+        TRACEVAR(votes_raw[0]);
+
+uint8_t txn_id[32];
+int64_t bytes_written =
+    otxn_id(txn_id, 32, 0);
+        TRACEHEX(txn_id);
+       
+        TRACEHEX(opinion); 
         uint8_t opinion_key[32];
         util_sha512h(SBUF(opinion_key), SBUF(opinion));
         opinion_key[0] = 'O';
 
-        state(SBUF(votes), SBUF(opinion_key));
+        TRACEHEX(opinion_key);
+        int64_t res = state(votes, 5, SBUF(opinion_key));
+
+        TRACEVAR(res);
+
+        TRACEHEX(votes);
 
         votes[4]++;
-        state_set(SBUF(votes), SBUF(opinion_key));
+        TRACEVAR(votes[4]);
+        
+        state_set(votes, 5, SBUF(opinion_key));
         
         // assign a cleanup key if this is a new opinion
         if (votes[4] == 1)
@@ -320,6 +347,9 @@ int64_t hook(uint32_t r)
         // check if the threshold is met (>50% of members)
         if (votes[4] >= threshold)
             post_info[4] = 1;
+
+        TRACEVAR(threshold);
+        TRACEVAR(post_info[4]);
 
         // update postinfo
         state_set(post_info, 37, opinion, 10);
