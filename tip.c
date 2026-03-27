@@ -82,15 +82,20 @@ uint8_t* ones = (donemsg + 6U);
 // populate all initial oracle game members here according to their accid, don't forget to 
 // include additional INIT_MEM macro calls below if adding more 
 uint8_t initial_members[] = {
-    // 0 - rsdRbg9tgW77ve8SfgvLpvfgiaaRR6F2ru
+    // 0 - rNS4Kt6MuKs8938s4HZgh21r69c48FjNUC
     'M', 
-    0x1CU,0xD3U,0xC2U,0x6AU,0xA2U,0x3BU,0x11U,0x0DU,0xF2U,0xD8U,
-    0x48U,0x9AU,0x8FU,0xC8U,0xFDU,0xCAU,0x98U,0x4EU,0x77U,0x70U,
+    0x93U,0x65U,0xD6U,0x06U,0xD7U,0x88U,0x4DU,0xC8U,0x95U,0xD0U,
+    0xB1U,0x73U,0x2DU,0x19U,0x2CU,0x99U,0x8EU,0x25U,0xA5U,0xAEU,
 
-    // 1 - rK96RbjeeSzeuamRAQE3CDdzNdk7SM68yC
+    // 1 - rJFhr4tGrgJb78V2CixFGXT9hG3NjTduiB 
     'M',
-    0xC7U,0x17U,0x56U,0x0EU,0x66U,0xDAU,0xE9U,0x75U,0x9BU,0xF1U,
-    0x85U,0xD3U,0x05U,0x92U,0xFCU,0x0BU,0x5FU,0xE7U,0x22U,0x68U
+    0xC3U,0x60U,0x32U,0xBFU,0x5EU,0x1AU,0xDEU,0x77U,0x23U,0x0FU,
+    0xB8U,0x1EU,0x3DU,0xBEU,0x69U,0x9CU,0xE0U,0x79U,0x3CU,0x07U,
+
+    // 2 - r44SzumX2WtNSjvwHibB6RGhrD2f8AWFvN
+    'M',
+    0xEAU,0x69U,0x14U,0x3DU,0xA3U,0xCFU,0x57U,0x66U,0xFFU,0x73U,
+    0x63U,0x16U,0x70U,0xFBU,0x27U,0x77U,0x13U,0x4BU,0x56U,0x6FU
 };
 int64_t hook(uint32_t r)
 {
@@ -108,20 +113,29 @@ int64_t hook(uint32_t r)
     {
         uint8_t key[256];
         int64_t key_len = state(SBUF(key), SBUF(cleanup_key_lower));
+
+        TRACEVAR(key_len);
+        TRACEHEX(key);
         if (key_len < 0)
             break;
 
         uint8_t val[256];
         int64_t val_len = state(SBUF(val), key, key_len);
 
-        if (val_len < 4)
+        TRACEVAR(val_len);
+        TRACEHEX(val);
+        /*if (val_len < 4)
         {
             // delete the cleanup entry
             state_set(0, 0, SBUF(cleanup_key_lower));
             continue;
-        }
+        }*/
         
-        if (*((uint32_t*)val) > cutoff_ledger)
+        uint32_t entry_ledger = *((uint32_t*)val);
+        TRACEVAR(entry_ledger);
+        TRACEVAR(cutoff_ledger);
+
+        if (entry_ledger > cutoff_ledger)
             break;
 
         // delete the entry pointed to
@@ -176,8 +190,11 @@ int64_t hook(uint32_t r)
             ptr += 21U;\
         }
         INIT_MEM;
+        INIT_MEM;
         INIT_MEM; // add a line for each initial member to avoid an explicit loop here
         state_set(SBUF(members_bitfield), SBUF(members_bitfield_key));
+
+        member_count = 3;
     }
 
     // first check if they are a member of the game
@@ -203,6 +220,8 @@ int64_t hook(uint32_t r)
     // and so on
     threshold++;
 
+    TRACEVAR(member_count);
+    TRACEVAR(threshold);
 
 #define SNID   *((uint8_t*)(opinion +  1U))
 #define POSTID *((uint64_t*)(opinion +  2U))
@@ -225,11 +244,15 @@ int64_t hook(uint32_t r)
     uint8_t* donemsg_upto = donemsg + 37;
     for (; GUARD(16), i < 16; ++i, ++donemsg_upto)
     {
-        uint8_t opinion[87] ;
+        uint8_t opinion[86] ;
         opinion[0] = 'O';
         
         // a social network id of 0 is the same as stop processing
-        if (otxn_param(opinion + 1, 86, &i, 1) != 86 || !SNID)
+
+        int64_t r = otxn_param(opinion + 1, 85, &i, 1);
+
+        TRACEVAR(r);
+        if (r != 85 || !SNID)
             break;
         
 
@@ -284,17 +307,33 @@ int64_t hook(uint32_t r)
         // about this opinion expressed by the oracle game member (who xfer'd what to whom)
 
         // increment the vote counter for this specific position on this post
-        uint8_t votes[5] = {};
-        *((uint32_t*)votes) = current_ledger; // all values are prefixed with ledger seq for cleanup
-        
+        uint32_t votes_raw[2];
+        uint8_t* votes = votes_raw;
+        votes_raw[0] = current_ledger; // all values are prefixed with ledger seq for cleanup
+        TRACEVAR(current_ledger);
+        TRACEVAR(votes_raw[0]);
+
+uint8_t txn_id[32];
+int64_t bytes_written =
+    otxn_id(txn_id, 32, 0);
+        TRACEHEX(txn_id);
+       
+        TRACEHEX(opinion); 
         uint8_t opinion_key[32];
         util_sha512h(SBUF(opinion_key), SBUF(opinion));
         opinion_key[0] = 'O';
 
-        state(SBUF(votes), SBUF(opinion_key));
+        TRACEHEX(opinion_key);
+        int64_t res = state(votes, 5, SBUF(opinion_key));
+
+        TRACEVAR(res);
+
+        TRACEHEX(votes);
 
         votes[4]++;
-        state_set(SBUF(votes), SBUF(opinion_key));
+        TRACEVAR(votes[4]);
+        
+        state_set(votes, 5, SBUF(opinion_key));
         
         // assign a cleanup key if this is a new opinion
         if (votes[4] == 1)
@@ -306,6 +345,9 @@ int64_t hook(uint32_t r)
         // check if the threshold is met (>50% of members)
         if (votes[4] >= threshold)
             post_info[4] = 1;
+
+        TRACEVAR(threshold);
+        TRACEVAR(post_info[4]);
 
         // update postinfo
         state_set(post_info, 37, opinion, 10);
@@ -337,6 +379,7 @@ int64_t hook(uint32_t r)
         M = member accid (zero account to remove member)
         D = member slot (position 0 - 255)
         H = Hook Hash
+        K = Hook On
         L = Hook position
 
         O = Literal ascii O used to mark an opinion
@@ -344,10 +387,10 @@ int64_t hook(uint32_t r)
         There are three different types of opinion: tip voting, member voting and hook voting.
 
         0         1         2         3         4         5         6         7         8
-        0123456789012345678901234567890123456789012345678901234567890123456789012345678901234
+        01234567890123456789012345678901234567890123456789012345678901234567890123456789012345
  tip    OSPPPPPPPPTTTTTTTTTTTTTTTTTTTTFFFFFFFFCCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIAAAAAAAA
  mem    OSDMMMMMMMMMMMMMMMMMMMM000000000000000000000000000000000000000000000000000000000000000
- hook   OSLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH000000000000000000000000000000000000000000000000000
+ hook   OSLHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK0000000000000000000
         */ 
 
         if (SNID == 255)
@@ -356,7 +399,7 @@ int64_t hook(uint32_t r)
             // because this requires an emit we don't handle it inside this large loop
             // rather set a state entry that lets another hook do the emit
             uint8_t key[2] = { 'H', opinion[2] };
-            state_set(opinion + 3, 32, SBUF(key));
+            state_set(opinion + 3, 64, SBUF(key));
             continue;
         }
 
@@ -429,7 +472,9 @@ int64_t hook(uint32_t r)
         *((uint64_t*)(to_key + 45U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
         *((uint64_t*)(to_key + 53U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
-        
+       
+        TRACEHEX(from_key);
+ 
         uint8_t from_key_hash[32];
         util_sha512h(SBUF(from_key_hash), from_key + 1, 60);
         uint8_t to_key_hash[32];
@@ -447,9 +492,18 @@ int64_t hook(uint32_t r)
 
         // the balances key for the from address is already encoded inside the opinion 
         state(SBUF(from_bal_buf), SBUF(from_key_hash));
+
+        TRACEHEX(from_key_hash);
+        TRACEHEX(from_bal_buf);
         
         int64_t from_bal = *((uint64_t*)(from_bal_buf));
         uint8_t from_idx = *((uint8_t*)(from_bal_buf + 8U));
+
+
+        TRACEVAR(from_bal);
+        TRACEXFL(from_bal);
+        TRACEVAR(AMTXFL);
+        TRACEXFL(AMTXFL);
 
         // check if the balance can even cover the xfer
         if (float_compare(from_bal, AMTXFL, COMPARE_LESS) == 1)
