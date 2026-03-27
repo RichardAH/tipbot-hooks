@@ -474,7 +474,9 @@ int64_t bytes_written =
         *((uint64_t*)(to_key + 45U)) = *((uint64_t*)(opinion + 62U));  // middle 8 bytes of issuer
         *((uint64_t*)(to_key + 53U)) = *((uint64_t*)(opinion + 70U));  // last 8 bytes of issuer
 
-        
+       
+        TRACEHEX(from_key);
+ 
         uint8_t from_key_hash[32];
         util_sha512h(SBUF(from_key_hash), from_key + 1, 60);
         uint8_t to_key_hash[32];
@@ -492,9 +494,18 @@ int64_t bytes_written =
 
         // the balances key for the from address is already encoded inside the opinion 
         state(SBUF(from_bal_buf), SBUF(from_key_hash));
+
+        TRACEHEX(from_key_hash);
+        TRACEHEX(from_bal_buf);
         
         int64_t from_bal = *((uint64_t*)(from_bal_buf));
         uint8_t from_idx = *((uint8_t*)(from_bal_buf + 8U));
+
+
+        TRACEVAR(from_bal);
+        TRACEXFL(from_bal);
+        TRACEVAR(AMTXFL);
+        TRACEXFL(AMTXFL);
 
         // check if the balance can even cover the xfer
         if (float_compare(from_bal, AMTXFL, COMPARE_LESS) == 1)

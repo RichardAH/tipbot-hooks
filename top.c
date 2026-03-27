@@ -247,6 +247,8 @@ int64_t hook(uint32_t r)
 
         // credit the user
         uint8_t to_key_hash[32];
+
+        TRACEHEX(to_key);
         util_sha512h(SBUF(to_key_hash), to_key + 1, 60);
 
         to_key_hash[0] = 'B';
@@ -306,6 +308,8 @@ int64_t hook(uint32_t r)
         }
 
         *((uint64_t*)to_bal_buf) = final_to_bal;
+        TRACEHEX(to_key_hash);
+        TRACEHEX(to_bal_buf);
         state_set(SBUF(to_bal_buf), SBUF(to_key_hash));
         DONE("Top: Credited top-up to user.");
     }
@@ -336,6 +340,7 @@ int64_t hook(uint32_t r)
         *((uint64_t*)(req + 45U)) == 0 &&
         *((uint64_t*)(req + 53U)) == 0);
 
+    TRACEHEX(req);
     uint8_t from_key_hash[32];
     util_sha512h(SBUF(from_key_hash), req + 1, 60);
 
