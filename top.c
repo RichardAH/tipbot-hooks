@@ -165,12 +165,7 @@ int64_t hook(uint32_t r)
         DONE("Top: Passing outgoing txn.");
 
     // pass all non-remits
-    uint16_t tt;
-    otxn_field(SVAR(tt), sfTransactionType);
-
-    
-
-    if (tt != ttREMIT)
+    if (otxn_type() != ttREMIT)
         DONE("Top: Passing non-remit.");
 
     // validate remit

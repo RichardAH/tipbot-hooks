@@ -157,9 +157,7 @@ int64_t hook(uint32_t r)
     if (BUFFER_EQUAL_20(hook_acc, (otxn_acc+1)))
         DONE("Tip: Passing outgoing txn.");
 
-    uint8_t tt[2];
-    otxn_field(SBUF(tt), sfTransactionType);
-    if (tt[0] != 0 || tt[1] != ttINVOKE)
+    if (otxn_type() != ttINVOKE)
         DONE("Tip: Passing non-invoke.");
 
     uint8_t members_bitfield[32];
