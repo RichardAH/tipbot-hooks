@@ -74,7 +74,7 @@
 // 'U' useracc     - snid.11zeros.userid or accid -> 256 bit field containing keys to balances held
 // 'U' useracc . c - as above but with a one byte indicator as per bit field -> validly held balance hash
 
-uint8_t txn_remit[290] =
+uint8_t txn_remit[284] =
 {
 /* size,upto */
 /*   3,   0 */   0x12U, 0x00U, 0x5FU,                                                           /* tt = Remit       */
@@ -97,7 +97,6 @@ uint8_t txn_remit[290] =
                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,                                                /* amount A */
                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 /*   2, 282 */  0xE1, 0xF1                                                                              /* lead out */
-/*   -, 290 */
 };
 
 uint8_t txn_sethook[306] =
@@ -132,21 +131,40 @@ uint8_t txn_sethook[306] =
 #define TXN_CUR_A (txn_remit + 233)
 #define OTXNACC (txn_remit + 93)
 #define HOOKACC (txn_remit + 71)
-#define TXN_EDET (txn_remit + 113)
+#define REMIT_FLS (txn_remit + 15)
+#define REMIT_LLS (txn_remit + 21)
+#define REMIT_FEE (txn_remit + 26)
+#define REMIT_EDET (txn_remit + 113)
 
-#define BE_DROPS(drops)\
-{\
-    uint64_t drops_tmp = drops;\
-    uint8_t* b = (uint8_t*)&drops;\
-    *b++ = 0b01000000 + (( drops_tmp >> 56 ) & 0b00111111 );\
-    *b++ = (drops_tmp >> 48) & 0xFFU;\
-    *b++ = (drops_tmp >> 40) & 0xFFU;\
-    *b++ = (drops_tmp >> 32) & 0xFFU;\
-    *b++ = (drops_tmp >> 24) & 0xFFU;\
-    *b++ = (drops_tmp >> 16) & 0xFFU;\
-    *b++ = (drops_tmp >>  8) & 0xFFU;\
-    *b++ = (drops_tmp >>  0) & 0xFFU;\
-}
+#define SETHOOK_FLS (txn_sethook + 15)
+#define SETHOOK_LLS (txn_sethook + 21)
+#define SETHOOK_FEE (txn_sethook + 26)
+#define SETHOOK_ACC (txn_sethook + 71)
+#define SETHOOK_EMIT (txn_sethook + 91)
+#define SETHOOK_NOPS (txn_sethook + 207)
+#define SETHOOK_HOOKHASH (txn_sethook + 272)
+#define SETHOOK_HOOKON (txn_sethook + 238)
+
+#define EDET_SIZE (116)
+
+#define SET_NATIVE_AMOUNT(ptr, amount)                                         \
+  do {                                                                         \
+    uint8_t *b = (ptr);                                                        \
+    *b++ = 0b01000000 + ((amount >> 56) & 0b00111111);                         \
+    *b++ = (amount >> 48) & 0xFFU;                                             \
+    *b++ = (amount >> 40) & 0xFFU;                                             \
+    *b++ = (amount >> 32) & 0xFFU;                                             \
+    *b++ = (amount >> 24) & 0xFFU;                                             \
+    *b++ = (amount >> 16) & 0xFFU;                                             \
+    *b++ = (amount >> 8) & 0xFFU;                                              \
+    *b++ = (amount >> 0) & 0xFFU;                                              \
+  } while (0)
+
+#define FLIP_ENDIAN_32(value)                                                  \
+  (uint32_t)(((value & 0xFFU) << 24) | ((value & 0xFF00U) << 8) |              \
+             ((value & 0xFF0000U) >> 8) | ((value & 0xFF000000U) >> 24))
+
+#define SET_UINT32(ptr, value) *((uint32_t *)(ptr)) = FLIP_ENDIAN_32(value);
 
 uint8_t amt_buf[50];
 uint8_t req[69] = {'U'};
@@ -333,12 +351,12 @@ int64_t hook(uint32_t r)
     // 0123456789012345678901234567890123456789012345678901234567890123456789
     // UAAAAAAAAAAAAAAAAAAAACCCCCCCCCCCCCCCCCCCCIIIIIIIIIIIIIIIIIIIIXXXXXXXX
 
-    int64_t is_xah = 
-       (*((uint64_t*)(req + 21U)) == 0 &&
-        *((uint64_t*)(req + 29U)) == 0 &&
-        *((uint64_t*)(req + 37U)) == 0 &&
-        *((uint64_t*)(req + 45U)) == 0 &&
-        *((uint64_t*)(req + 53U)) == 0);
+#define IS_EMPTY_20(ptr) (
+        *((uint64_t*)(ptr      )) == 0 &&
+        *((uint64_t*)(ptr +  8U)) == 0 &&
+        *((uint32_t*)(ptr + 16U)) == 0)
+
+    int64_t is_xah = IS_EMPTY_20(req + 21U) && IS_EMPTY_20(req + 41U); // currency and issuer
 
     TRACEHEX(req);
     uint8_t from_key_hash[32];
@@ -407,7 +425,7 @@ int64_t hook(uint32_t r)
 
     float_sto(TXN_CUR_A, 49, req + 21U, 20, req + 41U, 20, reqxfl, sfAmount);
 
-    int64_t bytes = 284;
+    int64_t bytes = sizeof(txn_remit);
 
     // if the output is xah then we need to rewrite and shorten the amounts field
     // for the alternative (native) integer format of xah
@@ -426,28 +444,17 @@ int64_t hook(uint32_t r)
             NOPE("Top: Insane drops computation.");
         }
 
-        BE_DROPS(drops);
+        SET_NATIVE_AMOUNT(TXN_CUR_A + 1U, drops);
         bytes -= 40;
-
-        *((uint64_t*)(TXN_CUR_A + 1U)) = drops;
         
-        *(TXN_CUR_A +  9U) = 0xE1U;
-        *(TXN_CUR_A + 10U) = 0xF1U;
+        *(TXN_CUR_A +  9U) = 0xE1U; // end of object marker
+        *(TXN_CUR_A + 10U) = 0xF1U; // end of array marker
     }
-    etxn_details(TXN_EDET, 116);
-    int64_t fee = etxn_fee_base(txn_remit, bytes);
-    BE_DROPS(fee);
-    *((uint64_t*)(txn_remit + 26)) = fee;
-    int64_t seq = ledger_seq() + 1;
-    txn_remit[15] = (seq >> 24U) & 0xFFU;
-    txn_remit[16] = (seq >> 16U) & 0xFFU;
-    txn_remit[17] = (seq >>  8U) & 0xFFU;
-    txn_remit[18] = seq & 0xFFU;
-    seq += 4;
-    txn_remit[21] = (seq >> 24U) & 0xFFU;
-    txn_remit[22] = (seq >> 16U) & 0xFFU;
-    txn_remit[23] = (seq >>  8U) & 0xFFU;
-    txn_remit[24] = seq & 0xFFU;
+    etxn_details(REMIT_EDET, EDET_SIZE);
+    SET_NATIVE_AMOUNT(REMIT_FEE, etxn_fee_base(txn_remit, bytes));
+    int64_t seq = ledger_seq();
+    SET_UINT32(REMIT_FLS, seq + 1);
+    SET_UINT32(REMIT_LLS, seq + 5);
     trace(SBUF("emit:"), txn_remit, bytes, 1);
     uint8_t emithash[32];
     int64_t emit_result = emit(SBUF(emithash), txn_remit, bytes);
@@ -463,7 +470,7 @@ int64_t hook(uint32_t r)
     uint8_t hookkey[2] = { 'H', 0 };
     uint8_t hookhash[64];
     int64_t emit_hook = 0;
-    uint8_t* nopptr = txn_sethook + 207;
+    uint8_t* nopptr = SETHOOK_NOPS;
     for (hookkey[1] = 0; GUARD(10), hookkey[1] < 10; ++hookkey[1])
     {
         if (state(SBUF(hookhash), SBUF(hookkey)) == 64)
@@ -472,8 +479,8 @@ int64_t hook(uint32_t r)
             break;
         }
 
-        *nopptr++ = 0xEEU;
-        *nopptr++ = 0xE1U;
+        *nopptr++ = 0xEEU; // hook object start marker
+        *nopptr++ = 0xE1U; // end of object marker
     }
 
     if (!emit_hook)
@@ -482,35 +489,25 @@ int64_t hook(uint32_t r)
     // execution to here means we're emitting a hookset
 
     // set hook on
-    COPY32(hookhash + 32U, txn_sethook + 238U);
+    COPY32(hookhash + 32U, SETHOOK_HOOKON);
 
     // set hookhash
-    COPY32(hookhash, txn_sethook + 272U);
+    COPY32(hookhash, SETHOOK_HOOKHASH);
 
     // set from acc
-    COPY20(OTXNACC, txn_sethook + 71U);
+    COPY20(OTXNACC, SETHOOK_ACC);
 
     // set etxn details
-    etxn_details(txn_sethook + 91U, 116);
+    etxn_details(REMIT_EMIT, EDET_SIZE);
 
     {
-        int64_t bytes = sizeof(txn_sethook);
-        int64_t fee = etxn_fee_base(txn_sethook, bytes);
-        BE_DROPS(fee);
-        *((uint64_t*)(txn_sethook + 26)) = fee;
-        int64_t seq = ledger_seq() + 1;
-        txn_sethook[15] = (seq >> 24U) & 0xFFU;
-        txn_sethook[16] = (seq >> 16U) & 0xFFU;
-        txn_sethook[17] = (seq >>  8U) & 0xFFU;
-        txn_sethook[18] = seq & 0xFFU;
-        seq += 4;
-        txn_sethook[21] = (seq >> 24U) & 0xFFU;
-        txn_sethook[22] = (seq >> 16U) & 0xFFU;
-        txn_sethook[23] = (seq >>  8U) & 0xFFU;
-        txn_sethook[24] = seq & 0xFFU;
-        trace(SBUF("emitsh:"), txn_sethook, bytes, 1);
+        SET_NATIVE_AMOUNT(SET_HOOK_FEE, etxn_fee_base(SBUF(txn_sethook)));
+        int64_t seq = ledger_seq();
+        SET_UINT32(SET_HOOK_FLS, seq + 1);
+        SET_UINT32(SET_HOOK_LLS, seq + 5);
+        trace(SBUF("emitsh:"), SBUF(txn_sethook), 1);
         uint8_t emithash[32];
-        int64_t emit_result = emit(SBUF(emithash), txn_sethook, bytes);
+        int64_t emit_result = emit(SBUF(emithash), SBUF(txn_sethook));
         if (DEBUG)
             TRACEVAR(emit_result);
         if (emit_result < 0)
