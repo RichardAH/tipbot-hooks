@@ -100,7 +100,12 @@ uint8_t txn_remit[290] =
 /*   -, 290 */
 };
 
-uint8_t txn_sethook[306] =
+// FIX: the original template included HookApiVersion (4 bytes at offset 227).
+// SetHook preflight explicitly rejects HookApiVersion on hsoINSTALL operations
+// (install-by-hash) because the referenced HookDefinition already carries its
+// own API version. Removing the field makes the emitted SetHook valid.
+// Template reduced from 306 to 302 bytes.
+uint8_t txn_sethook[302] =
 {
 /* size,upto */
 /*   3,   0 */   0x12U, 0x00U, 0x16U,                                                           /* tt = HookSet     */
@@ -114,20 +119,18 @@ uint8_t txn_sethook[306] =
 /* 116,  91 */   0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,    /* emit detail */
                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
                  0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-/*  place 18 nops here, so that the hook set can be offset to any of the 10 locations by changing the number
-    of empty objects ahead of the hooksetobj */
+/*  reserve enough room for sfHooks with up to 9 leading empty hook objects */
 /*  18, 207 */  0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U,
                 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U, 0x99U,
 /*   1, 225 */  0xFBU,                                                                      /* lead-in  hooks array */
 /*   1, 226 */  0xEEU,                                                                      /* lead-in hook entry 1 */
-/*   4, 227 */  0x10U, 0x14U, 0x00U, 0x00U,                                                 /* hookapiversion=0     */
-/*   5, 231 */  0x22U, 0x00U, 0x00U, 0x00U, 0x001U,                                         /* flags = hsfOverride  */
-/*  34, 236 */  0x50U, 0x14U,
+/*   5, 227 */  0x22U, 0x00U, 0x00U, 0x00U, 0x001U,                                         /* flags = hsfOverride  */
+/*  34, 232 */  0x50U, 0x14U,
                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,            /* hookon */
-/*  34, 270 */  0x50U, 0x1FU, 
+/*  34, 266 */  0x50U, 0x1FU, 
                 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,            /* hookhash */
-/*   2, 304 */  0xE1, 0xF1                                                                  /* lead out */
-/*   -, 306 */
+/*   2, 300 */  0xE1, 0xF1                                                                  /* lead out */
+/*   -, 302 */
 };
 #define TXN_CUR_A (txn_remit + 233)
 #define OTXNACC (txn_remit + 93)
@@ -181,6 +184,20 @@ int64_t hook(uint32_t r)
 
     if (slot_subfield(1, sfMintURIToken, 2) != DOESNT_EXIST)
         NOPE("Top: Remit cannot contain MintURIToken.");
+
+    // FIX: without this guard, a remit carrying both DEPOSIT and WITHDRAW
+    // params would silently take the deposit branch (because sfAmounts is
+    // present) while ignoring the withdraw request. Reject ambiguous input.
+    {
+        uint8_t param_probe[48];
+        int64_t has_deposit =
+            (otxn_param(param_probe, 20, "DEPOSIT", 7) == 20);
+        int64_t has_withdraw =
+            (otxn_param(param_probe, 48, "WITHDRAW", 8) == 48);
+        if (has_deposit && has_withdraw)
+            NOPE("Top: Remit cannot contain both DEPOSIT and WITHDRAW HookParameters.");
+    }
+
 
     if (slot_subfield(1, sfAmounts, 2) != DOESNT_EXIST)
     {
@@ -456,14 +473,12 @@ int64_t hook(uint32_t r)
     if (emit_result < 0)
         rollback(SBUF("Top: Emit remit failed."), __LINE__);
 
-
     // process any pending hooks. do this last because the above could rollback, and we just want to
     // piggyback on a successful txn
 
     uint8_t hookkey[2] = { 'H', 0 };
     uint8_t hookhash[64];
     int64_t emit_hook = 0;
-    uint8_t* nopptr = txn_sethook + 207;
     for (hookkey[1] = 0; GUARD(10), hookkey[1] < 10; ++hookkey[1])
     {
         if (state(SBUF(hookhash), SBUF(hookkey)) == 64)
@@ -471,9 +486,6 @@ int64_t hook(uint32_t r)
             emit_hook = 1;
             break;
         }
-
-        *nopptr++ = 0xEEU;
-        *nopptr++ = 0xE1U;
     }
 
     if (!emit_hook)
@@ -481,20 +493,54 @@ int64_t hook(uint32_t r)
         
     // execution to here means we're emitting a hookset
 
-    // set hook on
-    COPY32(hookhash + 32U, txn_sethook + 238U);
+    // FIX: the original code overwrote 0x99 NOP bytes in the template with
+    // EE/E1 pairs to position the hook object. This was fragile — the NOP
+    // region and the hook object fields had to align perfectly. Instead we
+    // now build the sfHooks array from scratch at offset 207, writing the
+    // correct number of empty hook objects followed by the real one.
+    uint8_t* hookarray = txn_sethook + 207U;
+    *hookarray++ = 0xFBU; /* sfHooks array start */
+    for (uint8_t i = 0; GUARD(10), i < hookkey[1]; ++i)
+    {
+        *hookarray++ = 0xEEU; /* empty hook object */
+        *hookarray++ = 0xE1U;
+    }
 
-    // set hookhash
-    COPY32(hookhash, txn_sethook + 272U);
+    *hookarray++ = 0xEEU; /* actual hook object start */
 
-    // set from acc
-    COPY20(OTXNACC, txn_sethook + 71U);
+    uint8_t* flags_ptr = hookarray;
+    *hookarray++ = 0x22U;
+    *hookarray++ = 0x00U;
+    *hookarray++ = 0x00U;
+    *hookarray++ = 0x00U;
+    *hookarray++ = 0x01U;
+
+    uint8_t* hookon_ptr = hookarray;
+    *hookarray++ = 0x50U;
+    *hookarray++ = 0x14U;
+    hookarray += 32U;
+
+    uint8_t* hookhash_ptr = hookarray;
+    *hookarray++ = 0x50U;
+    *hookarray++ = 0x1FU;
+    hookarray += 32U;
+
+    *hookarray++ = 0xE1U; /* object end */
+    *hookarray++ = 0xF1U; /* array end */
+
+    COPY32(hookhash + 32U, hookon_ptr + 2U);
+    COPY32(hookhash, hookhash_ptr + 2U);
+
+    // FIX: the original code wrote OTXNACC (the withdrawer's account) into
+    // sfAccount of the emitted SetHook. Emitted txns must have sfAccount ==
+    // the hook account, otherwise emit() rejects them. Changed to HOOKACC.
+    COPY20(HOOKACC, txn_sethook + 71U);
 
     // set etxn details
     etxn_details(txn_sethook + 91U, 116);
 
     {
-        int64_t bytes = sizeof(txn_sethook);
+        int64_t bytes = hookarray - txn_sethook;
         int64_t fee = etxn_fee_base(txn_sethook, bytes);
         BE_DROPS(fee);
         *((uint64_t*)(txn_sethook + 26)) = fee;
@@ -519,7 +565,7 @@ int64_t hook(uint32_t r)
     }
 
     // remove the state entry
-    state_set(0,0, SBUF(hookkey)); 
+    state_set(0,0, SBUF(hookkey));
 
     DONE("Top: Done (+sethook)");
 

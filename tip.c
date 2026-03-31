@@ -47,7 +47,6 @@ uint64_t* cleanup_upper = cleanup_key_upper + 1;
 
 uint8_t otxn_acc[21] = { 'M' };
 
-
 //uint8_t user_info_key[22] = { 'U' };
 
 // state keys:
@@ -79,8 +78,8 @@ uint8_t* tens = (donemsg + 5U);
 uint8_t* ones = (donemsg + 6U);
 
 
-// populate all initial oracle game members here according to their accid, don't forget to 
-// include additional INIT_MEM macro calls below if adding more 
+// populate all initial oracle game members here according to their accid, don't forget to
+// include additional INIT_MEM macro calls below if adding more
 uint8_t initial_members[] = {
     // 0 - rNS4Kt6MuKs8938s4HZgh21r69c48FjNUC
     'M', 
@@ -102,7 +101,10 @@ int64_t hook(uint32_t r)
     _g(1,1);
 
     uint32_t current_ledger = ledger_seq();
-    uint32_t cutoff_ledger = current_ledger - 20U;
+    // FIX: when current_ledger < 20, the subtraction wraps to ~4 billion
+    // (uint32_t underflow), causing every entry to appear "older than cutoff"
+    // and be immediately reaped — including freshly created state.
+    uint32_t cutoff_ledger = current_ledger > 20U ? current_ledger - 20U : 0;
 
     // pickup the gc boundaries, these represent which keys to examine for amortized removal
     state(cleanup_key_upper + 1, 8, SBUF(cleanup_key_highwater));
@@ -145,7 +147,7 @@ int64_t hook(uint32_t r)
     }
     
     state_set(cleanup_lower, 8,  SBUF(cleanup_key_lowwater));
- 
+
     // we've done amortized cleanup, so early ending will always be via DONE, so we get the cleanup processing
     // done even if there was an error   
 
@@ -203,8 +205,8 @@ int64_t hook(uint32_t r)
     uint8_t member_id;
     if (state(SVAR(member_id), SBUF(otxn_acc)) != 1)
         DONE("Tip: You're not a member of the tipbot oracle game. Did some cleanup anyway.");
-   
-    // execution to here means they're a member 
+
+    // execution to here means they're a member
     uint8_t const member_id_byte = member_id >> 3;
     uint8_t const member_id_bit = member_id % 8;
 
@@ -308,8 +310,11 @@ int64_t hook(uint32_t r)
         // now we've processed the general infomation about the post, process the specific information
         // about this opinion expressed by the oracle game member (who xfer'd what to whom)
 
-        // increment the vote counter for this specific position on this post
-        uint32_t votes_raw[2];
+        // FIX: votes_raw must be zero-initialized. On the first vote for a
+        // given opinion, state() returns DOESNT_EXIST and leaves the buffer
+        // untouched. Without = {0}, votes[4] (the counter byte) contains
+        // stack garbage, producing incorrect vote counts.
+        uint32_t votes_raw[2] = {0};
         uint8_t* votes = votes_raw;
         votes_raw[0] = current_ledger; // all values are prefixed with ledger seq for cleanup
         TRACEVAR(current_ledger);
@@ -422,12 +427,26 @@ int64_t bytes_written =
                 *((uint32_t*)(opinion + 19)) == 0)))
             {
                 // if the specified acc isnt the zero account we'll add a member too
-                // add a member
-                members_bitfield[opinion[2] >> 3] |= (1U << (opinion[2] % 8));
                 // copy accid into member key
                 *((uint64_t*)(memacc+1)) = *((uint64_t*)(opinion + 3));
                 *((uint64_t*)(memacc+9)) = *((uint64_t*)(opinion + 11));
                 *((uint32_t*)(memacc+17)) = *((uint32_t*)(opinion + 19));
+
+                // FIX: if the new account already occupies a different seat,
+                // the old seat's reverse key ('P' + old_seat) and its bit in
+                // the members bitfield must be cleared first. Without this,
+                // the same account ends up in two seats — inflating
+                // member_count and distorting the voting threshold.
+                uint8_t existing_pos;
+                if (state(SVAR(existing_pos), SBUF(memacc)) == 1 && existing_pos != opinion[2])
+                {
+                    uint8_t existing_reverse[2] = {'P', existing_pos};
+                    members_bitfield[existing_pos >> 3] &= ~(1U << (existing_pos % 8));
+                    state_set(0, 0, SBUF(existing_reverse));
+                }
+
+                // add / move member into the requested seat
+                members_bitfield[opinion[2] >> 3] |= (1U << (opinion[2] % 8));
 
                 // add member key
                 state_set(opinion + 2, 1, SBUF(memacc));
@@ -609,7 +628,7 @@ int64_t bytes_written =
         
         state_set(SBUF(to_bal_buf), SBUF(to_key_hash));
     }
-    
+
     // update the cleanup boundaries
     state_set(cleanup_upper, 8,  SBUF(cleanup_key_highwater));
 
@@ -618,4 +637,3 @@ int64_t bytes_written =
 
     DONE(donemsg);
 }
-
