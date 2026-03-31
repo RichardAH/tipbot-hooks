@@ -45,7 +45,9 @@ uint8_t cleanup_key_upper[32] = {'C'};
 uint64_t* cleanup_lower = cleanup_key_lower + 1;
 uint64_t* cleanup_upper = cleanup_key_upper + 1;
 
-uint8_t otxn_acc[21] = { 'M' };
+uint8_t member_acc[21] = {'M'};
+
+#define OTXNACC (member_acc + 1)
 
 
 //uint8_t user_info_key[22] = { 'U' };
@@ -149,12 +151,12 @@ int64_t hook(uint32_t r)
     // we've done amortized cleanup, so early ending will always be via DONE, so we get the cleanup processing
     // done even if there was an error   
 
-    otxn_field(otxn_acc + 1, 20, sfAccount);
+    otxn_field(OTXNACC, 20, sfAccount);
 
     uint8_t hook_acc[20];
     hook_account(SBUF(hook_acc));
 
-    if (BUFFER_EQUAL_20(hook_acc, (otxn_acc+1)))
+    if (BUFFER_EQUAL_20(hook_acc, OTXNACC)
         DONE("Tip: Passing outgoing txn.");
 
     uint8_t tt[2];
@@ -201,7 +203,7 @@ int64_t hook(uint32_t r)
 
     // first check if they are a member of the game
     uint8_t member_id;
-    if (state(SVAR(member_id), SBUF(otxn_acc)) != 1)
+    if (state(SVAR(member_id), SBUF(member_acc)) != 1)
         DONE("Tip: You're not a member of the tipbot oracle game. Did some cleanup anyway.");
    
     // execution to here means they're a member 
